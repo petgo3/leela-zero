@@ -358,18 +358,17 @@ bool GTP::execute(GameState & game, std::string xinput) {
                 return 1;
             }
 			game.set_to_move(who);
-			// if handi > cfg_max_handicap
-			int move = FastBoard::RESIGN;
-			if (game.get_handicap() <= cfg_max_handicap)
+
+			// Support some handicap games
+			bool isgoodgame = true;
+			cfg_reverse_board_for_net = false;
+			// this is only for use in KGS where resigning is correct to decline a game
+			if (cfg_max_handicap < 99)
 			{
-				// Support some handicap games
-				bool isgoodgame = true;
-				cfg_reverse_board_for_net = false;
-				if (cfg_max_handicap < 99)
+				isgoodgame = false;
+				if (game.get_handicap() <= cfg_max_handicap)
 				{
-					// this is only for use in KGS where resigning is correct to decline a game
 					// LZ white, 0 and 1 handicap
-					isgoodgame = false;
 					if (who == FastBoard::WHITE && game.get_handicap() == 0 && game.get_komi() > 0.0f)
 					{
 						if (game.get_komi() < 7.5f)
@@ -394,13 +393,17 @@ bool GTP::execute(GameState & game, std::string xinput) {
 						isgoodgame = true;
 					}
 				}
-				if (isgoodgame)
-				{
-					// start thinking
-					move = search->think(who);
-				}
 			}
-			
+
+			int move;
+			if (isgoodgame)
+			{
+				// start thinking
+				move = search->think(who);
+			} else {
+				// resign to decline game
+				move = FastBoard::RESIGN;
+			}
 			game.play_move(move);
 			std::string vertex = game.move_to_text(move);
             gtp_printf(id, "%s", vertex.c_str());
@@ -411,9 +414,10 @@ bool GTP::execute(GameState & game, std::string xinput) {
                     search->ponder();
                 }
             }
-        } else {
-            gtp_fail_printf(id, "syntax not understood");
-        }
+		}
+		else {
+			gtp_fail_printf(id, "syntax not understood");
+		}
         return true;
     } else if (command.find("kgs-genmove_cleanup") == 0) {
         std::istringstream cmdstream(command);

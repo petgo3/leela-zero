@@ -57,7 +57,7 @@ bool UCTSearch::advance_to_new_rootstate() {
     }
 
     auto depth =
-        (int) (m_rootstate.get_movenum() - m_last_rootstate->get_movenum());
+        int(m_rootstate.get_movenum() - m_last_rootstate->get_movenum());
 
     if (depth < 0) {
         return false;
@@ -133,8 +133,10 @@ SearchResult UCTSearch::play_simulation(GameState & currstate,
             auto score = currstate.final_score();
             result = SearchResult::from_score(score);
         } else if (m_nodes < MAX_TREE_SIZE) {
+            auto mem_full_pct = m_nodes / static_cast<float>(MAX_TREE_SIZE);
             float eval;
-            auto success = node->create_children(m_nodes, currstate, eval);
+            auto success =
+                node->create_children(m_nodes, currstate, eval, mem_full_pct);
             if (success) {
                 result = SearchResult::from_eval(eval);
             }
@@ -142,7 +144,7 @@ SearchResult UCTSearch::play_simulation(GameState & currstate,
     }
 
     if (node->has_children() && !result.valid()) {
-        auto next = node->uct_select_child(color);
+        auto next = node->uct_select_child(color, node == m_root.get());
 
         if (next != nullptr) {
             auto move = next->get_move();
@@ -243,12 +245,6 @@ bool UCTSearch::should_resign(passflag_t passflag, float bestscore) {
 
     if (cfg_resignpct == 0) {
         // resign not allowed
-        return false;
-    }
-
-    const auto visits = m_root->get_visits();
-    if (visits < std::min(500, cfg_max_playouts))  {
-        // low visits
         return false;
     }
 
@@ -439,8 +435,7 @@ bool UCTSearch::is_running() const {
     return m_run && m_nodes < MAX_TREE_SIZE;
 }
 
-int UCTSearch::est_playouts_left(int elapsed_centis, int time_for_move) const
-{
+int UCTSearch::est_playouts_left(int elapsed_centis, int time_for_move) const {
     auto playouts = m_playouts.load();
     const auto playouts_left = std::min(m_maxplayouts - playouts,
                                         m_maxvisits - m_root->get_visits());
@@ -452,30 +447,52 @@ int UCTSearch::est_playouts_left(int elapsed_centis, int time_for_move) const
     }
     const auto playout_rate = 1.0f * playouts / elapsed_centis;
     const auto time_left = time_for_move - elapsed_centis;
-    return std::min(playouts_left, static_cast<int>(std::ceil(playout_rate * time_left)));
+    return std::min(playouts_left,
+                    static_cast<int>(std::ceil(playout_rate * time_left)));
 }
 
 size_t UCTSearch::prune_noncontenders(int elapsed_centis, int time_for_move) {
     auto Nfirst = 0;
     for (const auto& node : m_root->get_children()) {
         if (node->valid()) {
-             Nfirst = std::max(Nfirst, node->get_visits());
+            Nfirst = std::max(Nfirst, node->get_visits());
         }
     }
-    const auto min_required_visits = Nfirst - est_playouts_left(elapsed_centis, time_for_move);
+    const auto min_required_visits =
+        Nfirst - est_playouts_left(elapsed_centis, time_for_move);
     auto pruned_nodes = size_t{0};
     for (const auto& node : m_root->get_children()) {
         if (node->valid()) {
-             const auto has_enough_visits = node->get_visits() >= min_required_visits;
-             node->set_active(has_enough_visits);
-             if (!has_enough_visits) {
-                 ++pruned_nodes;
-             }
+            const auto has_enough_visits =
+                node->get_visits() >= min_required_visits;
+            node->set_active(has_enough_visits);
+            if (!has_enough_visits) {
+                ++pruned_nodes;
+            }
         }
     }
 
     assert(pruned_nodes < m_root->get_children().size());
     return pruned_nodes;
+}
+
+bool UCTSearch::have_alternate_moves(int elapsed_centis, int time_for_move) {
+    if (cfg_timemanage != TimeManagement::ON) {
+        return true;
+    }
+    auto pruned = prune_noncontenders(elapsed_centis, time_for_move);
+    if (pruned == m_root->get_children().size() - 1) {
+        // In a timed search we will essentially always exit because
+        // the remaining time is too short to let another move win, so
+        // avoid spamming this message every move. We'll print it if we
+        // save at least half a second.
+        if (time_for_move - elapsed_centis > 50) {
+            myprintf("%.1fs left, stopping early.\n",
+                     (time_for_move - elapsed_centis) / 100.0f);
+        }
+        return false;
+    }
+    return true;
 }
 
 bool UCTSearch::stop_thinking(int elapsed_centis, int time_for_move) const {
@@ -509,7 +526,8 @@ int UCTSearch::think(int color, passflag_t passflag) {
     // set up timing info
     Time start;
 
-    m_rootstate.get_timecontrol().set_boardsize(m_rootstate.board.get_boardsize());
+    m_rootstate.get_timecontrol().set_boardsize(
+        m_rootstate.board.get_boardsize());
     auto time_for_move = m_rootstate.get_timecontrol().max_time_for_move(color);
 
     myprintf("Thinking at most %.1f seconds...\n", time_for_move/100.0f);
@@ -525,9 +543,8 @@ int UCTSearch::think(int color, passflag_t passflag) {
     }
     m_root->kill_superkos(m_rootstate);
     if (cfg_noise) {
-        // Adjusting the Dirichlet noise's alpha constant to the board size
+        // Adjust the Dirichlet noise's alpha constant to the board size
         auto alpha = 0.03f * 361.0f / BOARD_SQUARES;
-
         m_root->dirichlet_noise(0.25f, alpha);
     }
 
@@ -562,13 +579,7 @@ int UCTSearch::think(int color, passflag_t passflag) {
         }
         keeprunning  = is_running();
         keeprunning &= !stop_thinking(elapsed_centis, time_for_move);
-        if (keeprunning && cfg_timemanage == TimeManagement::ON) {
-            if (prune_noncontenders(elapsed_centis, time_for_move) == m_root->get_children().size() - 1) {
-                myprintf("%.1fs left\n", (time_for_move - elapsed_centis)/100.0f);
-                myprintf("Stopping early.\n");
-                keeprunning = false;
-            }
-        }
+        keeprunning &= have_alternate_moves(elapsed_centis, time_for_move);
     } while(keeprunning);
 
     // reactivate all pruned root children
@@ -593,11 +604,11 @@ int UCTSearch::think(int color, passflag_t passflag) {
     Time elapsed;
     int elapsed_centis = Time::timediff_centis(start, elapsed);
     if (elapsed_centis+1 > 0) {
-        myprintf("%d visits, %d nodes, %d playouts, %d n/s\n\n",
+        myprintf("%d visits, %d nodes, %d playouts, %.0f n/s\n\n",
                  m_root->get_visits(),
                  static_cast<int>(m_nodes),
                  static_cast<int>(m_playouts),
-                 (m_playouts * 100) / (elapsed_centis+1));
+                 (m_playouts * 100.0) / (elapsed_centis+1));
     }
     int bestmove = get_best_move(passflag);
 
@@ -615,13 +626,16 @@ void UCTSearch::ponder() {
     for (int i = 1; i < cpus; i++) {
         tg.add_task(UCTWorker(m_rootstate, this, m_root.get()));
     }
+    auto keeprunning = true;
     do {
         auto currstate = std::make_unique<GameState>(m_rootstate);
         auto result = play_simulation(*currstate, m_root.get());
         if (result.valid()) {
             increment_playouts();
         }
-    } while(!Utils::input_pending() && is_running());
+        keeprunning  = is_running();
+        keeprunning &= !stop_thinking(0, 1);
+    } while(!Utils::input_pending() && keeprunning);
 
     // stop the search
     m_run = false;
@@ -638,7 +652,9 @@ void UCTSearch::set_playout_limit(int playouts) {
                                       decltype(m_maxplayouts)>::value,
                   "Inconsistent types for playout amount.");
     if (playouts == 0) {
-        m_maxplayouts = std::numeric_limits<decltype(m_maxplayouts)>::max();
+        // Divide max by 2 to prevent overflow when multithreading.
+        m_maxplayouts = std::numeric_limits<decltype(m_maxplayouts)>::max()
+                        / 2;
     } else {
         m_maxplayouts = playouts;
     }
@@ -649,7 +665,9 @@ void UCTSearch::set_visit_limit(int visits) {
                                       decltype(m_maxvisits)>::value,
                   "Inconsistent types for visits amount.");
     if (visits == 0) {
-        m_maxvisits = std::numeric_limits<decltype(m_maxvisits)>::max();
+        // Divide max by 2 to prevent overflow when multithreading.
+        m_maxvisits = std::numeric_limits<decltype(m_maxvisits)>::max()
+                      / 2;
     } else {
         m_maxvisits = visits;
     }

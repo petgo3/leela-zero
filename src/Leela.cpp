@@ -82,8 +82,12 @@ static void parse_commandline(int argc, char *argv[]) {
         ("logfile,l", po::value<std::string>(), "File to log input/output to.")
         ("quiet,q", "Disable all diagnostic output.")
         ("noponder", "Disable thinking on opponent's time.")
+<<<<<<< HEAD
 		("maxhandi,x", po::value<int>()->default_value(cfg_max_handicap), "Maximum handicap stones, more will resign as first move (a must for KGS). Enables also inversion of net for playing w at 0.5 komi. ")
         ("benchmark", "Test network and exit. Default args:\n-p1600 --noponder "
+=======
+        ("benchmark", "Test network and exit. Default args:\n-v3200 --noponder "
+>>>>>>> 9bcec6937e61412713d61c01b1445fc123b4bdd0
                       "-m0 -t1 -s1.")
 #ifdef USE_OPENCL
         ("gpu",  po::value<std::vector<int> >(),
@@ -277,7 +281,7 @@ static void parse_commandline(int argc, char *argv[]) {
             cfg_num_threads = 1;
         }
         if (!vm.count("playouts") && !vm.count("visits")) {
-            cfg_max_playouts = 1600; // Default to self-play and match values.
+            cfg_max_visits = 3200; // Default to self-play and match values.
         }
     }
 

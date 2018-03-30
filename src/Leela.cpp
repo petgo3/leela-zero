@@ -82,6 +82,7 @@ static void parse_commandline(int argc, char *argv[]) {
         ("logfile,l", po::value<std::string>(), "File to log input/output to.")
         ("quiet,q", "Disable all diagnostic output.")
         ("noponder", "Disable thinking on opponent's time.")
+		("maxhandi,x", po::value<int>()->default_value(cfg_max_handicap), "Maximum handicap stones, more will resign as first move (a must for KGS). Enables also inversion of net for playing w at 0.5 komi. ")
         ("benchmark", "Test network and exit. Default args:\n-p1600 --noponder "
                       "-m0 -t1 -s1.")
 #ifdef USE_OPENCL
@@ -288,6 +289,11 @@ static void parse_commandline(int argc, char *argv[]) {
         out << " --seed " << cfg_rng_seed;
     }
     cfg_options_str = out.str();
+	if (vm.count("maxhandi")) {
+		int maxhandicap = vm["maxhandi"].as<int>();
+		cfg_max_handicap = maxhandicap;
+		
+	}
 }
 
 // Setup global objects after command line has been parsed

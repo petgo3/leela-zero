@@ -1,6 +1,6 @@
 /*
     This file is part of Leela Zero.
-    Copyright (C) 2017 Gian-Carlo Pascutto
+    Copyright (C) 2017-2018 Gian-Carlo Pascutto and contributors
 
     Leela Zero is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -126,7 +126,6 @@ const std::string GTP::s_commands[] = {
     "quit",
     "known_command",
     "list_commands",
-    "quit",
     "boardsize",
     "clear_board",
     "komi",

@@ -41,6 +41,7 @@ extern int cfg_noise;
 extern int cfg_random_cnt;
 extern std::uint64_t cfg_rng_seed;
 extern bool cfg_dumbpass;
+extern bool cfg_reverse_board_for_net;
 #ifdef USE_OPENCL
 extern std::vector<int> cfg_gpus;
 extern bool cfg_sgemm_exhaustive;

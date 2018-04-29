@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <algorithm>
+
 #include <boost/format.hpp>
 #include <boost/program_options.hpp>
 #include <cstdio>
@@ -28,7 +29,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
 #include "GTP.h"
 #include "GameState.h"
 #include "Network.h"
@@ -82,7 +82,7 @@ static void parse_commandline(int argc, char *argv[]) {
         ("logfile,l", po::value<std::string>(), "File to log input/output to.")
         ("quiet,q", "Disable all diagnostic output.")
         ("noponder", "Disable thinking on opponent's time.")
-		("maxhandi,x", po::value<int>()->default_value(cfg_max_handicap), "Maximum handicap stones, more will resign as first move (a must for KGS). Enables also inversion of net for playing w at 0.5 komi. ")
+     		("maxhandi,x", po::value<int>()->default_value(cfg_max_handicap), "Maximum handicap stones, more will resign as first move (a must for KGS). Enables also inversion of net for playing w at 0.5 komi. ")
         ("benchmark", "Test network and exit. Default args:\n-v3200 --noponder "
                       "-m0 -t1 -s1.")
 #ifdef USE_OPENCL
@@ -294,7 +294,6 @@ static void parse_commandline(int argc, char *argv[]) {
 	if (vm.count("maxhandi")) {
 		int maxhandicap = vm["maxhandi"].as<int>();
 		cfg_max_handicap = maxhandicap;
-		
 	}
 }
 

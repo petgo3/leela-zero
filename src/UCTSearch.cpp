@@ -504,6 +504,7 @@ std::string UCTSearch::get_dump_analysis() {
 	dump += get_pv(tempstate, *m_root).substr(0, 20);*/
 	return dump;
 }
+
 void UCTSearch::dump_analysis(int playouts) {
 	if (cfg_quiet) {
 		return;

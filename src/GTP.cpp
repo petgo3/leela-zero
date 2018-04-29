@@ -73,7 +73,6 @@ bool cfg_quiet;
 std::string cfg_options_str;
 bool cfg_benchmark;
 int cfg_max_handicap;
-
 void GTP::setup_default_parameters() {
     cfg_gtp_mode = false;
     cfg_allow_pondering = true;
@@ -716,7 +715,6 @@ bool GTP::execute(GameState & game, std::string xinput) {
         return true;
     } else if (command.find("kgs-chat") == 0) {
 		chat_kgs(game, id, command);
-
         return true;
     } else if (command.find("kgs-game_over") == 0) {
         // Do nothing. Particularly, don't ponder.

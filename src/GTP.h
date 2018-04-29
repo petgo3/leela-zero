@@ -1,6 +1,6 @@
 /*
     This file is part of Leela Zero.
-    Copyright (C) 2017-2018 Gian-Carlo Pascutto and contributors
+    Copyright (C) 2017 Gian-Carlo Pascutto
 
     Leela Zero is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,7 +41,6 @@ extern int cfg_noise;
 extern int cfg_random_cnt;
 extern std::uint64_t cfg_rng_seed;
 extern bool cfg_dumbpass;
-extern bool cfg_reverse_board_for_net;
 #ifdef USE_OPENCL
 extern std::vector<int> cfg_gpus;
 extern bool cfg_sgemm_exhaustive;
@@ -55,8 +54,8 @@ extern std::string cfg_weightsfile;
 extern FILE* cfg_logfile_handle;
 extern bool cfg_quiet;
 extern std::string cfg_options_str;
-extern int cfg_max_handicap;
 extern bool cfg_benchmark;
+extern int cfg_max_handicap;
 
 /*
     A list of all valid GTP2 commands is defined here:
@@ -66,6 +65,7 @@ extern bool cfg_benchmark;
 class GTP {
 public:
     static bool execute(GameState & game, std::string xinput);
+	static void chat_kgs(GameState & game, int id, std::string command);
     static void setup_default_parameters();
 private:
     static constexpr int GTP_VERSION = 2;

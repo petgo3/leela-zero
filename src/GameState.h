@@ -1,6 +1,6 @@
 /*
     This file is part of Leela Zero.
-    Copyright (C) 2017-2018 Gian-Carlo Pascutto and contributors
+    Copyright (C) 2017 Gian-Carlo Pascutto
 
     Leela Zero is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -64,6 +64,22 @@ public:
     void display_state();
     bool has_resigned() const;
     int who_resigned() const;
+	// Winrates
+	std::string winrate_you;
+	std::string winrate_me;
+	float best_moves_diff;
+	std::string best_move;
+	float bad_moves_diff;
+	std::string bad_move;
+	std::string else_move;
+	std::string bad_else_move;
+
+	std::string bad_move_history;
+	bool cfg_reverse_board_for_net;
+	bool cfg_reverse_board_set;
+	float cfg_quick_move;
+	float correct_moves;
+	float counted_moves;
 
 private:
     bool valid_handicap(int stones);

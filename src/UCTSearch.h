@@ -92,19 +92,22 @@ public:
     void increment_playouts();
     SearchResult play_simulation(GameState& currstate, UCTNode* const node);
 	float get_winrate();
+	std::string get_dump_analysis();
+
+	int getPlayouts();
+	int get_best_move(passflag_t passflag);
 
 private:
     float get_min_psa_ratio() const;
     void dump_stats(FastState& state, UCTNode& parent);
     void tree_stats(const UCTNode& node);
     std::string get_pv(FastState& state, UCTNode& parent);
-    void dump_analysis(int playouts);
+	void dump_analysis(int playouts);
     bool should_resign(passflag_t passflag, float bestscore);
     bool have_alternate_moves(int elapsed_centis, int time_for_move);
     int est_playouts_left(int elapsed_centis, int time_for_move) const;
     size_t prune_noncontenders(int elapsed_centis = 0, int time_for_move = 0);
     bool stop_thinking(int elapsed_centis = 0, int time_for_move = 0) const;
-    int get_best_move(passflag_t passflag);
     void update_root();
     bool advance_to_new_rootstate();
 

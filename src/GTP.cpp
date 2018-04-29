@@ -1,6 +1,6 @@
 /*
     This file is part of Leela Zero.
-    Copyright (C) 2017-2018 Gian-Carlo Pascutto and contributors
+    Copyright (C) 2017 Gian-Carlo Pascutto
 
     Leela Zero is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -71,9 +71,8 @@ std::string cfg_logfile;
 FILE* cfg_logfile_handle;
 bool cfg_quiet;
 std::string cfg_options_str;
-int cfg_max_handicap;
-bool cfg_reverse_board_for_net;
 bool cfg_benchmark;
+int cfg_max_handicap;
 
 void GTP::setup_default_parameters() {
     cfg_gtp_mode = false;
@@ -89,7 +88,7 @@ void GTP::setup_default_parameters() {
     cfg_max_visits = std::numeric_limits<decltype(cfg_max_visits)>::max();
     cfg_timemanage = TimeManagement::AUTO;
     cfg_lagbuffer_cs = 100;
-	cfg_max_handicap = 99;
+	cfg_max_handicap = 13;
 #ifdef USE_OPENCL
     cfg_gpus = { };
     cfg_sgemm_exhaustive = false;
@@ -126,6 +125,7 @@ const std::string GTP::s_commands[] = {
     "quit",
     "known_command",
     "list_commands",
+    "quit",
     "boardsize",
     "clear_board",
     "komi",
@@ -321,6 +321,17 @@ bool GTP::execute(GameState & game, std::string xinput) {
 
         return true;
     } else if (command.find("play") == 0) {
+		// analysis
+		if (search->getPlayouts() > 100)
+		{
+			game.winrate_you = search->get_dump_analysis();
+			game.cfg_quick_move = search->get_winrate();
+			if (game.get_movenum() > 2 + game.get_handicap())
+			{
+				game.else_move = game.move_to_text(search->get_best_move(0));
+			}
+		}
+
         if (command.find("resign") != std::string::npos) {
             game.play_move(FastBoard::RESIGN);
             gtp_printf(id, "");
@@ -328,7 +339,7 @@ bool GTP::execute(GameState & game, std::string xinput) {
             game.play_move(FastBoard::PASS);
             gtp_printf(id, "");
         } else {
-            std::istringstream cmdstream(command);
+			std::istringstream cmdstream(command);
             std::string tmp;
             std::string color, vertex;
 
@@ -354,74 +365,113 @@ bool GTP::execute(GameState & game, std::string xinput) {
         cmdstream >> tmp;  // eat genmove
         cmdstream >> tmp;
 
-		if (!cmdstream.fail()) {
-			int who;
-			if (tmp == "w" || tmp == "white") {
-				who = FastBoard::WHITE;
-			}
-			else if (tmp == "b" || tmp == "black") {
-				who = FastBoard::BLACK;
-			}
-			else {
-				gtp_fail_printf(id, "syntax error");
-				return 1;
-			}
+        if (!cmdstream.fail()) {
+            int who;
+            if (tmp == "w" || tmp == "white") {
+                who = FastBoard::WHITE;
+            } else if (tmp == "b" || tmp == "black") {
+                who = FastBoard::BLACK;
+            } else {
+                gtp_fail_printf(id, "syntax error");
+                return 1;
+            }
 			game.set_to_move(who);
 			// if handi > cfg_max_handicap
 			int move = FastBoard::RESIGN;
 			if (game.get_handicap() <= cfg_max_handicap)
 			{
-				// Support some handicap games
-				bool isgoodgame = true;
-				cfg_reverse_board_for_net = false;
-				if (cfg_max_handicap < 99)
+				if (game.get_komi() >= 0.0f)
 				{
-					// this is only for use in KGS where resigning is correct to decline a game
-				    // LZ white, 0 and 1 handicap
-					isgoodgame = false;
-					if (who == FastBoard::WHITE && game.get_handicap() == 0 && game.get_komi() > 0.0f)
+					game.cfg_reverse_board_for_net = false;
+					if (game.get_komi() + game.get_handicap() < 7.4f)
 					{
-						isgoodgame = true;
-						if (game.get_komi() < 7.5f)
+						if (who == FastBoard::WHITE)
 						{
-							cfg_reverse_board_for_net = true;
+							game.cfg_reverse_board_for_net = true;
 						}
 					}
-					// LZ white, more than 1 stone
-					if (who == FastBoard::WHITE && game.get_handicap() > 1 && game.get_handicap() <= cfg_max_handicap && game.get_komi() + game.get_handicap() >= 7.5f)
+					if (game.get_handicap() > 2 && game.cfg_reverse_board_for_net)
 					{
-						isgoodgame = true;
-						// do not invert board for handicap, this leads to ladders ...
+						// high handicap only with not inverted net
 					}
-					// LZ black, 0 and 1 handicap
-					if (who == FastBoard::BLACK && game.get_handicap() == 0 && game.get_komi() > 0.0f && game.get_komi() <= 7.5f)
+					else
 					{
-						isgoodgame = true;
-					}
-					// LZ black, more than 1 stone
-					if (who == FastBoard::BLACK && game.get_komi() <= 7.5f && game.get_handicap() <= cfg_max_handicap && game.get_komi() > 0.0f)
-					{
-						isgoodgame = true;
+						// start thinking
+						move = search->think(who);
 					}
 				}
-				if (isgoodgame)
+			}
+			if (search->getPlayouts() > 100)
+			{
+				// if playing handicap game with white, NN gets b&w inverted to use -7.5 komi (which is not correct, but better than +7.5 komi)
+				if (game.cfg_reverse_board_for_net == true && ((game.get_movenum() > 50 && game.cfg_quick_move < 30.0f) || game.get_handicap() == 0 || game.get_movenum() > 220))
 				{
-					// start thinking
-					move = search->think(who);
+					game.cfg_reverse_board_set = true;
+				}
+				// analysis
+				game.winrate_me = search->get_dump_analysis();
+
+				float aktual_wr = search->get_winrate();
+				float wr_diff = aktual_wr - 100.0f + game.cfg_quick_move;
+				if (
+					game.get_movenum() == 10 || game.get_movenum() == 11 ||
+					game.get_movenum() == 30 || game.get_movenum() == 31 ||
+					game.get_movenum() == 60 || game.get_movenum() == 61 ||
+					game.get_movenum() == 90 || game.get_movenum() == 91 ||
+					game.get_movenum() == 120 || game.get_movenum() == 121
+					)
+				{
+					game.best_moves_diff = 0;
+					game.best_move = "--";
+					game.bad_moves_diff = 0;
+					game.bad_move = "--";
+					game.else_move = "--";
+					game.bad_else_move = "--";
+				}
+				if (game.get_movenum() > game.get_handicap() + 2)
+				{
+					if (game.move_to_text(game.get_last_move()) == game.else_move)
+					{
+						game.correct_moves++;
+					}
+					game.counted_moves++;
+					if (wr_diff < game.best_moves_diff)
+					{
+						// save best_move
+						game.best_move = game.move_to_text(game.get_last_move());
+						game.best_moves_diff = wr_diff;
+					}
+					if (wr_diff > game.bad_moves_diff && game.move_to_text(game.get_last_move()) != game.else_move)
+					{
+						// save worst_move
+						game.bad_move = game.move_to_text(game.get_last_move());
+						game.bad_moves_diff = wr_diff;
+						game.bad_else_move = game.else_move;
+					}
+					if (wr_diff > game.bad_moves_diff / 2 && game.bad_moves_diff > 0 && game.move_to_text(game.get_last_move()) != game.else_move)
+					{
+						if (game.else_move != "resign" && game.else_move != "--")
+						{
+							// add to bad history
+							game.bad_move_history += " " + game.move_to_text(game.get_last_move()) + " (" + std::to_string(wr_diff) + ", " + game.else_move + ")";
+						}
+					}
 				}
 			}
 
 			game.play_move(move);
 			std::string vertex = game.move_to_text(move);
 			gtp_printf(id, "%s", vertex.c_str());
-			if (cfg_allow_pondering) {
-				// now start pondering
-				if (!game.has_resigned()) {
-					search->ponder();
-				}
-			}
-		}
-		else {
+
+
+
+            if (cfg_allow_pondering) {
+                // now start pondering
+                if (!game.has_resigned()) {
+                    search->ponder();
+                }
+            }
+        } else {
             gtp_fail_printf(id, "syntax not understood");
         }
         return true;
@@ -563,19 +613,20 @@ bool GTP::execute(GameState & game, std::string xinput) {
     } else if (command.find("heatmap") == 0) {
         std::istringstream cmdstream(command);
         std::string tmp;
-        int symmetry;
+        int rotation;
 
         cmdstream >> tmp;   // eat heatmap
-        cmdstream >> symmetry;
+        cmdstream >> rotation;
 
-        if (cmdstream.fail()) {
-            symmetry = 0;
+        if (!cmdstream.fail()) {
+            auto vec = Network::get_scored_moves(
+                &game, Network::Ensemble::DIRECT, rotation, true);
+            Network::show_heatmap(&game, vec, false);
+        } else {
+            auto vec = Network::get_scored_moves(
+                &game, Network::Ensemble::DIRECT, 0, true);
+            Network::show_heatmap(&game, vec, false);
         }
-
-        auto vec = Network::get_scored_moves(
-            &game, Network::Ensemble::DIRECT, symmetry, true);
-        Network::show_heatmap(&game, vec, false);
-
         gtp_printf(id, "");
         return true;
     } else if (command.find("fixed_handicap") == 0) {
@@ -664,34 +715,8 @@ bool GTP::execute(GameState & game, std::string xinput) {
         }
         return true;
     } else if (command.find("kgs-chat") == 0) {
-        // kgs-chat (game|private) Name Message
-        std::istringstream cmdstream(command);
-        std::string tmp;
+		chat_kgs(game, id, command);
 
-        cmdstream >> tmp; // eat kgs-chat
-        cmdstream >> tmp; // eat game|private
-		if (tmp == "private")
-		{
-			cmdstream >> tmp; // eat player name
-			cmdstream >> tmp; // eat message
-			if (tmp == "wr")
-			{
-				// 100 - because it's LZ-opponents turn, when this code is running 
-				std::string outkgschat = "Winrate: " + std::to_string(100 - search.get()->get_winrate());
-				gtp_printf(id, outkgschat.c_str());
-				gtp_printf(id, "end answer from lz");
-				do {
-					cmdstream >> tmp; // eat message
-
-				} while (!cmdstream.fail());
-				return true;
-			}
-		}
-        do {
-            cmdstream >> tmp; // eat message
-        } while (!cmdstream.fail());
-
-        gtp_fail_printf(id, "I'm a go bot, not a chat bot.");
         return true;
     } else if (command.find("kgs-game_over") == 0) {
         // Do nothing. Particularly, don't ponder.
@@ -860,4 +885,67 @@ bool GTP::execute(GameState & game, std::string xinput) {
 
     gtp_fail_printf(id, "unknown command");
     return true;
+}
+
+void GTP::chat_kgs(GameState & game, int id, std::string command)
+{
+	// kgs-chat (game|private) Name Message
+	std::istringstream cmdstream(command);
+	std::string tmp;
+
+	cmdstream >> tmp; // eat kgs-chat
+	cmdstream >> tmp; // eat game|private
+	if (tmp == "private")
+	{
+		cmdstream >> tmp; // eat player name
+		cmdstream >> tmp; // eat message
+		if (tmp == "wr")
+		{
+			std::string inv = "(net is normal) ";
+			if (game.cfg_reverse_board_set == true)
+			{
+				inv = "(net is inverted) ";
+			}
+			std::string mov = "At move ";
+			if (game.get_movenum() > game.get_handicap())
+			{
+				mov = "At move " + game.move_to_text(game.get_last_move());
+			}
+			//std::string outkgschat = "#" + std::to_string(static_cast<int>(game.get_movenum())) + ": " + 
+				std::string outkgschat = mov + ": " + inv + game.winrate_me + " " + game.winrate_you + " Moves till now: -best: " + game.best_move + " (Val: " + std::to_string(game.best_moves_diff) + ") -worst: " + game.bad_move + " (Val: " + std::to_string(game.bad_moves_diff) + "). I would have played "+game.bad_else_move;
+			gtp_printf(id, outkgschat.c_str());
+			gtp_printf(id, "end answer from lz");
+			do {
+				cmdstream >> tmp; // eat message
+			} while (!cmdstream.fail());
+			return;
+		}
+		if (tmp == "bm")
+		{
+			std::string outkgschat = "";
+			if (game.counted_moves > 0.0f)
+			{
+				outkgschat += "Correct moves: " + std::to_string(100.0f * game.correct_moves / game.counted_moves) + " percent! ";
+			}
+			if (game.bad_move_history != "")
+			{
+				outkgschat += "Bad moves were (value, good move): ";
+			}
+			outkgschat += game.bad_move_history;
+			gtp_printf(id, outkgschat.c_str());
+			gtp_printf(id, "end answer from lz");
+			do {
+				cmdstream >> tmp; // eat message
+			} while (!cmdstream.fail());
+			return;
+		}
+
+	}
+	do {
+		cmdstream >> tmp; // eat message
+	} while (!cmdstream.fail());
+
+	gtp_printf(id, "Unknown command, i know only 'wr' (=winrate) and 'bm' (=list of bad moves (value, better move)) ");
+	gtp_printf(id, "end answer from lz");
+	return;
 }

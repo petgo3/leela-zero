@@ -28,7 +28,7 @@
 
 using namespace Utils;
 
-TimeControl::TimeControl(int boardsize, int maintime, int byotime,
+TimeControl::TimeControl(int maintime, int byotime,
                          int byostones, int byoperiods)
     : m_maintime(maintime),
       m_byotime(byotime),
@@ -36,10 +36,9 @@ TimeControl::TimeControl(int boardsize, int maintime, int byotime,
       m_byoperiods(byoperiods) {
 
     reset_clocks();
-    set_boardsize(boardsize);
 }
 
-std::string TimeControl::to_text_sgf() {
+std::string TimeControl::to_text_sgf() const {
     if (m_byotime != 0 && m_byostones == 0 && m_byoperiods == 0) {
         return ""; // infinite
     }
@@ -137,10 +136,11 @@ void TimeControl::display_times() {
     myprintf("\n");
 }
 
-int TimeControl::max_time_for_move(int color) {
+int TimeControl::max_time_for_move(int boardsize,
+                                   int color, size_t movenum) const {
     // default: no byo yomi (absolute)
     auto time_remaining = m_remaining_time[color];
-    auto moves_remaining = m_moves_expected;
+    auto moves_remaining = get_moves_expected(boardsize, movenum);
     auto extra_time_per_move = 0;
 
     if (m_byotime != 0) {
@@ -215,22 +215,37 @@ void TimeControl::adjust_time(int color, int time, int stones) {
     }
 }
 
-void TimeControl::set_boardsize(int boardsize) {
+size_t TimeControl::opening_moves(int boardsize) const {
+    auto num_intersections = boardsize * boardsize;
+    auto fast_moves = num_intersections / 6;
+    return fast_moves;
+}
+
+int TimeControl::get_moves_expected(int boardsize, size_t movenum) const {
     auto board_div = 5;
     if (cfg_timemanage != TimeManagement::OFF) {
         // We will take early exits with time management on, so
         // it's OK to make our base time bigger.
         board_div = 9;
     }
+
     // Note this is constant as we play, so it's fair
     // to underestimate quite a bit.
-    m_moves_expected = (boardsize * boardsize) / board_div;
+    auto base_remaining = (boardsize * boardsize) / board_div;
+
+    // Don't think too long in the opening.
+    auto fast_moves = opening_moves(boardsize);
+    if (movenum < fast_moves) {
+        return (base_remaining + fast_moves) - movenum;
+    } else {
+        return base_remaining;
+    }
 }
 
 // Returns true if we are in a time control where we
 // can save up time. If not, we should not move quickly
 // even if certain of our move, but plough ahead.
-bool TimeControl::can_accumulate_time(int color) {
+bool TimeControl::can_accumulate_time(int color) const {
     if (m_inbyo[color]) {
         // Cannot accumulate in Japanese byo yomi
         if (m_byoperiods) {

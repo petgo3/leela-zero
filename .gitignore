@@ -8,4 +8,6 @@ training/tf/venv
 leelaz-model*
 *.orig
 leelaz_opencl_tuning
-src/Leela.cpp
+/build-autogtp-*
+/build-validation-*
+.vs/

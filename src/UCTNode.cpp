@@ -78,6 +78,7 @@ bool UCTNode::create_children(Network & network,
     if (state.board.white_to_move()) {
         m_net_eval = 1.0f - m_net_eval;
     }
+	update(m_net_eval);
     eval = m_net_eval;
 
     std::vector<Network::PolicyVertexPair> nodelist;
@@ -250,7 +251,7 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
             }
         }
     }
-	float pure_eval = get_raw_eval(color, 0);
+	float pure_eval = get_raw_eval(color, 1);
     const auto numerator = std::sqrt(double(parentvisits));
     auto fpu_reduction = (is_root ? cfg_fpu_root_reduction : cfg_fpu_reduction) * std::sqrt(total_visited_policy)*pure_eval / 0.5f;
     // Estimated eval for unknown nodes = original parent NN eval - reduction
@@ -272,6 +273,13 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
         } else if (child.get_visits() > 0) {
             winrate = child.get_eval(color);
         }
+
+		if (child.get_move() == FastBoard::PASS)
+		{
+			winrate = winrate * 0.8;
+		}
+
+
         const auto psa = child.get_policy();
         const auto denom = 1.0 + child.get_visits();
         const auto puct = cfg_puct * psa * (numerator / denom) * pure_eval / 0.5f;
@@ -279,14 +287,13 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
         assert(value > std::numeric_limits<double>::lowest());
 
         if (value > best_value) {
-            best_value = value;
             best = &child;
-        }
+			best_value = value;
+		}
     }
-
     assert(best != nullptr);
     best->inflate();
-    return best->get();
+	return best->get();
 }
 
 class NodeComp : public std::binary_function<UCTNodePointer&,

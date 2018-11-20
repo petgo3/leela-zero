@@ -212,6 +212,7 @@ SearchResult UCTSearch::play_simulation(GameState & currstate,
         if (currstate.get_passes() >= 2) {
             auto score = currstate.final_score();
             result = SearchResult::from_score(score);
+			node->update(result.eval());
         } else {
             float eval;
             const auto had_children = node->has_children();
@@ -233,12 +234,13 @@ SearchResult UCTSearch::play_simulation(GameState & currstate,
             next->invalidate();
         } else {
             result = play_simulation(currstate, next);
+			node->update(result.eval());
         }
     }
 
-    if (result.valid()) {
-        node->update(result.eval());
-    }
+    //if (result.valid()) {
+    //    node->update(result.eval());
+    //}
     node->virtual_loss_undo();
 
     return result;
@@ -740,17 +742,20 @@ int UCTSearch::think(int color, passflag_t passflag) {
         m_rootstate.get_timecontrol().max_time_for_move(
             m_rootstate.board.get_boardsize(),
             color, m_rootstate.get_movenum());
-	if (cfg_quick_move < 10.0f)
+	if (cfg_quick_move > 0.0f)
 	{
-		time_for_move = time_for_move * cfg_quick_move / 10;
-	}
-	if (cfg_quick_move < 5.0f)
-	{
-		time_for_move = time_for_move * cfg_quick_move / 20;
-	}
-	if (time_for_move < 100)
-	{
-		time_for_move = 100;
+		if (cfg_quick_move < 10.0f)
+		{
+			time_for_move = time_for_move * cfg_quick_move / 10;
+		}
+		if (cfg_quick_move < 5.0f)
+		{
+			time_for_move = time_for_move * cfg_quick_move / 20;
+		}
+		if (time_for_move < 100)
+		{
+			time_for_move = 100;
+		}
 	}
 
     myprintf("Thinking at most %.1f seconds...\n", time_for_move/100.0f);

@@ -184,6 +184,12 @@ static void parse_commandline(int argc, char *argv[]) {
     if (vm.count("puct")) {
         cfg_puct = vm["puct"].as<float>();
     }
+	if (vm.count("logpuct")) {
+		cfg_logpuct = vm["logpuct"].as<float>();
+	}
+	if (vm.count("logconst")) {
+		cfg_logconst = vm["logconst"].as<float>();
+	}
     if (vm.count("softmax_temp")) {
         cfg_softmax_temp = vm["softmax_temp"].as<float>();
     }

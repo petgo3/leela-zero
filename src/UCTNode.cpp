@@ -78,6 +78,7 @@ bool UCTNode::create_children(Network & network,
     if (state.board.white_to_move()) {
         m_net_eval = 1.0f - m_net_eval;
     }
+	
 	update(m_net_eval);
     eval = m_net_eval;
 
@@ -89,12 +90,28 @@ bool UCTNode::create_children(Network & network,
         const auto y = i / BOARD_SIZE;
         const auto vertex = state.board.get_vertex(x, y);
         if (state.is_move_legal(to_move, vertex)) {
-            nodelist.emplace_back(raw_netlist.policy[i], vertex);
-            legal_sum += raw_netlist.policy[i];
+			//if (state.board.black_to_move() && cfg_handicap_used > 2)
+			//{
+			//	float r2 = static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / 0.8f)) - 0.4f;
+			//	nodelist.emplace_back(raw_netlist.policy[i] * (1 + r2), vertex);
+			//	legal_sum += raw_netlist.policy[i] * (1 + r2);
+			//}
+			//else
+			{
+				nodelist.emplace_back(raw_netlist.policy[i], vertex);
+				legal_sum += raw_netlist.policy[i];
+			}
         }
     }
-    nodelist.emplace_back(raw_netlist.policy_pass, FastBoard::PASS);
-    legal_sum += raw_netlist.policy_pass;
+	if (state.get_movenum() < 150 || eval < 0.1f)
+	{
+		nodelist.emplace_back(raw_netlist.policy_pass*0, FastBoard::PASS);
+	}
+	else
+	{
+		nodelist.emplace_back(raw_netlist.policy_pass, FastBoard::PASS);
+		legal_sum += raw_netlist.policy_pass;
+	}
 
     if (legal_sum > std::numeric_limits<float>::min()) {
         // re-normalize after removing illegal moves.
@@ -110,6 +127,7 @@ bool UCTNode::create_children(Network & network,
     }
 
     link_nodelist(nodecount, nodelist, min_psa_ratio);
+	
     expand_done();
     return true;
 }
@@ -234,6 +252,7 @@ double UCTNode::get_blackevals() const {
 }
 
 void UCTNode::accumulate_eval(float eval) {
+	
     atomic_add(m_blackevals, double(eval));
 }
 
@@ -251,11 +270,16 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
             }
         }
     }
-	float pure_eval = get_raw_eval(color, 1);
-    const auto numerator = std::sqrt(double(parentvisits));
-    auto fpu_reduction = (is_root ? cfg_fpu_root_reduction : cfg_fpu_reduction) * std::sqrt(total_visited_policy)*pure_eval / 0.5f;
+	//float pure_eval = get_raw_eval(color, 1);
+    const auto numerator = std::sqrt(double(parentvisits)*
+		std::log(cfg_logpuct * double(parentvisits) + cfg_logconst));
+	auto fpu_reduction = (is_root ? cfg_fpu_root_reduction : cfg_fpu_reduction) * std::sqrt(total_visited_policy);
+	//*pure_eval / 0.5f;
     // Estimated eval for unknown nodes = original parent NN eval - reduction
-    const auto fpu_eval = pure_eval - fpu_reduction;
+    //const auto fpu_eval = pure_eval - fpu_reduction;
+	const auto fpu_eval = get_net_eval(color) - fpu_reduction;
+	
+	//const auto fpu_eval = get_net_eval(color) - fpu_reduction;
 
     auto best = static_cast<UCTNodePointer*>(nullptr);
     auto best_value = std::numeric_limits<double>::lowest();
@@ -274,21 +298,23 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
             winrate = child.get_eval(color);
         }
 
-		if (child.get_move() == FastBoard::PASS)
-		{
-			winrate = winrate * 0.8;
-		}
+		
 
 
         const auto psa = child.get_policy();
         const auto denom = 1.0 + child.get_visits();
-        const auto puct = cfg_puct * psa * (numerator / denom) * pure_eval / 0.5f;
+		const auto puct = cfg_puct * psa * (numerator / denom);
+		//*pure_eval / 0.5f;
         const auto value = winrate + puct;
         assert(value > std::numeric_limits<double>::lowest());
 
         if (value > best_value) {
             best = &child;
 			best_value = value;
+			/*if (parentvisits == 0)
+			{
+			break;
+			}*/
 		}
     }
     assert(best != nullptr);
@@ -302,13 +328,15 @@ public:
     NodeComp(int color) : m_color(color) {};
     bool operator()(const UCTNodePointer& a,
                     const UCTNodePointer& b) {
-        // if visits are not same, sort on visits
-        if (a.get_visits() != b.get_visits()) {
-            return a.get_visits() < b.get_visits();
+		auto a_visit = a.get_visits();
+		auto b_visit = b.get_visits();
+		// if visits are not same, sort on visits
+        if (a_visit != b_visit) {
+            return a_visit < b_visit;
         }
 
         // neither has visits, sort on policy prior
-        if (a.get_visits() == 0) {
+        if (a_visit == 0) {
             return a.get_policy() < b.get_policy();
         }
 

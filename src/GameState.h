@@ -73,6 +73,7 @@ public:
 	std::string winrate_you;
 	std::string winrate_me;
 	float best_moves_diff;
+	float total_moves_diff;
 	std::string best_move;
 	float bad_moves_diff;
 	std::string bad_move;

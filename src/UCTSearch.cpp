@@ -238,9 +238,6 @@ SearchResult UCTSearch::play_simulation(GameState & currstate,
         }
     }
 
-    //if (result.valid()) {
-    //    node->update(result.eval());
-    //}
     node->virtual_loss_undo();
 
     return result;
@@ -409,6 +406,14 @@ bool UCTSearch::should_resign(passflag_t passflag, float besteval) {
         auto blend_ratio = std::min(1.0f, movenum / (0.6f * num_intersections));
         auto blended_resign_threshold = blend_ratio * resign_threshold
             + (1 - blend_ratio) * handicap_resign_threshold;
+		if (cfg_reverse_board_set == true && movenum < 250)
+		{
+			blended_resign_threshold = blended_resign_threshold / 2;
+			if (blended_resign_threshold > 3.0f)
+			{
+				blended_resign_threshold = 3.0f;
+			}
+		}
         if (besteval > blended_resign_threshold) {
             // Allow lower eval for white in handicap games
             // where opp may fumble.
@@ -628,7 +633,7 @@ bool UCTSearch::is_running() const {
 int UCTSearch::est_playouts_left(int elapsed_centis, int time_for_move) const {
     auto playouts = m_playouts.load();
     const auto playouts_left =
-        std::max(0, std::min(m_maxplayouts - playouts,
+        std::max(0, std::max(m_maxplayouts - playouts,
                              m_maxvisits - m_root->get_visits()));
 
     // Wait for at least 1 second and 100 playouts
@@ -708,8 +713,8 @@ bool UCTSearch::have_alternate_moves(int elapsed_centis, int time_for_move) {
 }
 
 bool UCTSearch::stop_thinking(int elapsed_centis, int time_for_move) const {
-    return m_playouts >= m_maxplayouts
-           || m_root->get_visits() >= m_maxvisits
+    return (m_playouts >= m_maxplayouts
+           && m_root->get_visits() >= m_maxvisits)
            || elapsed_centis >= time_for_move;
 }
 

@@ -73,6 +73,8 @@ precision_t cfg_precision;
 #endif
 #endif
 float cfg_puct;
+float cfg_logpuct;
+float cfg_logconst;
 float cfg_softmax_temp;
 float cfg_fpu_reduction;
 float cfg_fpu_root_reduction;
@@ -137,9 +139,11 @@ void GTP::setup_default_parameters() {
     cfg_precision = precision_t::AUTO;
 #endif
 #endif
-    cfg_puct = 0.8f;
+    cfg_puct = 0.5f;
+	cfg_logpuct = 0.015f;
     cfg_softmax_temp = 1.0f;
     cfg_fpu_reduction = 0.25f;
+	cfg_logconst = 1.7f;
     // see UCTSearch::should_resign
     cfg_resignpct = -1;
     cfg_noise = false;
@@ -523,7 +527,11 @@ void GTP::execute(GameState & game, const std::string& xinput) {
 					game.winrate_me = search->get_dump_analysis();
 
 					float aktual_wr = search->get_winrate();
-					float wr_diff = aktual_wr - 100.0f + cfg_quick_move;
+					float wr_diff = 0.0f;
+					if (cfg_quick_move > 0.0f)
+					{
+						wr_diff = aktual_wr - 100.0f + cfg_quick_move;
+					}
 					if (
 						game.get_movenum() == 10 || game.get_movenum() == 11 ||
 						game.get_movenum() == 30 || game.get_movenum() == 31 ||
@@ -539,6 +547,12 @@ void GTP::execute(GameState & game, const std::string& xinput) {
 						game.else_move = "--";
 						game.bad_else_move = "--";
 					}
+					if (game.get_movenum() == game.get_handicap())
+					{
+						game.total_moves_diff = 0;
+					}
+					game.total_moves_diff += wr_diff;
+
 					if (game.get_movenum() > game.get_handicap() + 2)
 					{
 						if (game.move_to_text(game.get_last_move()) == game.else_move)
@@ -1323,7 +1337,12 @@ void GTP::chat_kgs(GameState & game, int id, std::string command)
 				mov = "At move " + game.move_to_text(game.get_last_move());
 			}
 			//std::string outkgschat = "#" + std::to_string(static_cast<int>(game.get_movenum())) + ": " + 
-			std::string outkgschat = mov + ": " + inv + game.winrate_me + " " + game.winrate_you + " Moves till now: -best: " + game.best_move + " (Val: " + std::to_string(game.best_moves_diff).substr(0, 4) + ") -worst: " + game.bad_move + " (Val: " + std::to_string(game.bad_moves_diff).substr(0, 4) + "). I would have played " + game.bad_else_move;
+			std::string outkgschat = mov + ": " + inv + game.winrate_me + " " 
+				+ game.winrate_you + " Moves till now: -best: " 
+				+ game.best_move + " (Val: " + std::to_string(game.best_moves_diff).substr(0, 4)
+				+ ") -worst: " + game.bad_move + " (Val: " + std::to_string(game.bad_moves_diff).substr(0, 4) 
+				+ "). I would have played " + game.bad_else_move
+				+ " Quot: " + std::to_string(game.total_moves_diff/ static_cast<float>(game.get_movenum())).substr(0, 4);
 			gtp_printf(id, outkgschat.c_str());
 			gtp_printf(id, "end answer from lz");
 			do {

@@ -47,6 +47,7 @@ void GameState::init_game(int size, float komi) {
 
     m_resigned = FastBoard::EMPTY;
 	best_moves_diff = 0;
+	total_moves_diff = 0;
 	best_move = "--";
 	bad_moves_diff = 0;
 	bad_move = "--";
@@ -72,6 +73,7 @@ void GameState::reset_game() {
 
     m_resigned = FastBoard::EMPTY;
 	best_moves_diff = 0;
+	total_moves_diff = 0;
 	best_move = "--";
 	bad_moves_diff = 0;
 	bad_move = "--";

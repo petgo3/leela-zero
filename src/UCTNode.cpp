@@ -1,6 +1,6 @@
 /*
     This file is part of Leela Zero.
-    Copyright (C) 2017-2018 Gian-Carlo Pascutto
+    Copyright (C) 2017-2019 Gian-Carlo Pascutto
 
     Leela Zero is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -14,6 +14,17 @@
 
     You should have received a copy of the GNU General Public License
     along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
+
+    Additional permission under GNU GPL version 3 section 7
+
+    If you modify this Program, or any covered work, by linking or
+    combining it with NVIDIA Corporation's libraries from the
+    NVIDIA CUDA Toolkit and/or the NVIDIA CUDA Deep Neural
+    Network library and/or the NVIDIA TensorRT inference library
+    (or a modified version of those libraries), containing parts covered
+    by the terms of the respective license agreement, the licensors of
+    this Program grant you additional permission to convey the resulting
+    work.
 */
 
 #include "config.h"
@@ -72,15 +83,15 @@ bool UCTNode::create_children(Network & network,
         &state, Network::Ensemble::RANDOM_SYMMETRY);
 
     // DCNN returns winrate as side to move
-    m_net_eval = raw_netlist.winrate;
-    const auto to_move = state.board.get_to_move();
-    // our search functions evaluate from black's point of view
-    if (state.board.white_to_move()) {
-        m_net_eval = 1.0f - m_net_eval;
-    }
-	
-	update(m_net_eval);
-    eval = m_net_eval;
+	float winrate_for_player = raw_netlist.winrate;
+	m_net_eval = 1.0f - m_net_eval;
+	const auto to_move = state.board.get_to_move();
+	if (to_move == FastBoard::WHITE) {
+		m_net_eval = eval = 1.0f - winrate_for_player;
+	}
+	else {
+		m_net_eval = eval = winrate_for_player;
+	}
 
     std::vector<Network::PolicyVertexPair> nodelist;
 
@@ -90,28 +101,33 @@ bool UCTNode::create_children(Network & network,
         const auto y = i / BOARD_SIZE;
         const auto vertex = state.board.get_vertex(x, y);
         if (state.is_move_legal(to_move, vertex)) {
-			//if (state.board.black_to_move() && cfg_handicap_used > 2)
-			//{
-			//	float r2 = static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / 0.8f)) - 0.4f;
-			//	nodelist.emplace_back(raw_netlist.policy[i] * (1 + r2), vertex);
-			//	legal_sum += raw_netlist.policy[i] * (1 + r2);
-			//}
-			//else
-			{
-				nodelist.emplace_back(raw_netlist.policy[i], vertex);
-				legal_sum += raw_netlist.policy[i];
-			}
+            nodelist.emplace_back(raw_netlist.policy[i], vertex);
+            legal_sum += raw_netlist.policy[i];
         }
     }
-	if (state.get_movenum() < 150 || eval < 0.1f)
-	{
-		nodelist.emplace_back(raw_netlist.policy_pass*0, FastBoard::PASS);
-	}
-	else
-	{
-		nodelist.emplace_back(raw_netlist.policy_pass, FastBoard::PASS);
-		legal_sum += raw_netlist.policy_pass;
-	}
+
+    // Always try passes if we're not trying to be clever.
+    auto allow_pass = cfg_dumbpass;
+
+    // Less than 20 available intersections in a 19x19 game.
+    if (nodelist.size() <= std::max(5, BOARD_SIZE)) {
+        allow_pass = true;
+    }
+
+    // If we're clever, only try passing if we're winning on the
+    // net score and on the board count.
+    if (!allow_pass && winrate_for_player > 0.8f) {
+        const auto relative_score =
+            (to_move == FastBoard::BLACK ? 1 : -1) * state.final_score();
+        if (relative_score >= 0) {
+            allow_pass = true;
+        }
+    }
+
+    if (allow_pass) {
+        nodelist.emplace_back(raw_netlist.policy_pass, FastBoard::PASS);
+        legal_sum += raw_netlist.policy_pass;
+    }
 
     if (legal_sum > std::numeric_limits<float>::min()) {
         // re-normalize after removing illegal moves.
@@ -127,7 +143,6 @@ bool UCTNode::create_children(Network & network,
     }
 
     link_nodelist(nodecount, nodelist, min_psa_ratio);
-	
     expand_done();
     return true;
 }
@@ -188,8 +203,16 @@ void UCTNode::virtual_loss_undo() {
 }
 
 void UCTNode::update(float eval) {
+    // Cache values to avoid race conditions.
+    auto old_eval = static_cast<float>(m_blackevals);
+    auto old_visits = static_cast<int>(m_visits);
+    auto old_delta = old_visits > 0 ? eval - old_eval / old_visits : 0.0f;
     m_visits++;
     accumulate_eval(eval);
+    auto new_delta = eval - (old_eval + eval) / (old_visits + 1);
+    // Welford's online algorithm for calculating variance.
+    auto delta = old_delta * new_delta;
+    atomic_add(m_squared_eval_diff, delta);
 }
 
 bool UCTNode::has_children() const {
@@ -215,8 +238,27 @@ void UCTNode::set_policy(float policy) {
     m_policy = policy;
 }
 
+float UCTNode::get_eval_variance(float default_var) const {
+    return m_visits > 1 ? m_squared_eval_diff / (m_visits - 1) : default_var;
+}
+
 int UCTNode::get_visits() const {
     return m_visits;
+}
+
+float UCTNode::get_eval_lcb(int color) const {
+    // Lower confidence bound of winrate.
+    auto visits = get_visits();
+    if (visits < 2) {
+        // Return large negative value if not enough visits.
+        return -1e6f + visits;
+    }
+    auto mean = get_raw_eval(color);
+
+    auto stddev = std::sqrt(get_eval_variance(1.0f) / visits);
+    auto z = cached_t_quantile(visits - 1);
+
+    return mean - z * stddev;
 }
 
 float UCTNode::get_raw_eval(int tomove, int virtual_loss) const {
@@ -252,7 +294,6 @@ double UCTNode::get_blackevals() const {
 }
 
 void UCTNode::accumulate_eval(float eval) {
-	
     atomic_add(m_blackevals, double(eval));
 }
 
@@ -260,26 +301,26 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
     wait_expanded();
 
     // Count parentvisits manually to avoid issues with transpositions.
-    auto total_visited_policy = 0.0f;
+    //auto total_visited_policy = 0.0f;
     auto parentvisits = size_t{0};
+	auto max_policy = 0.0f;
+	auto max_unvisited_policy = 0.0f;
     for (const auto& child : m_children) {
         if (child.valid()) {
             parentvisits += child.get_visits();
-            if (child.get_visits() > 0) {
-                total_visited_policy += child.get_policy();
+			max_policy = std::max(max_policy, child.get_policy());
+            if (child.get_visits() == 0) {
+				max_unvisited_policy = std::max(max_unvisited_policy, child.get_policy());
             }
         }
     }
-	//float pure_eval = get_raw_eval(color, 1);
-    const auto numerator = std::sqrt(double(parentvisits)*
-		std::log(cfg_logpuct * double(parentvisits) + cfg_logconst));
-	auto fpu_reduction = (is_root ? cfg_fpu_root_reduction : cfg_fpu_reduction) * std::sqrt(total_visited_policy);
-	//*pure_eval / 0.5f;
+
+    const auto numerator = std::sqrt(double(parentvisits) *
+            std::log(cfg_logpuct * double(parentvisits) + cfg_logconst));
+	const auto policyratio = max_unvisited_policy / (max_unvisited_policy + max_policy);
+    const auto fpu_reduction = (is_root ? cfg_fpu_root_reduction : cfg_fpu_reduction) * Utils::erfinv_approx(1 - 2 * policyratio);
     // Estimated eval for unknown nodes = original parent NN eval - reduction
-    //const auto fpu_eval = pure_eval - fpu_reduction;
-	const auto fpu_eval = get_net_eval(color) - fpu_reduction;
-	
-	//const auto fpu_eval = get_net_eval(color) - fpu_reduction;
+    const auto fpu_eval = get_net_eval(color) - fpu_reduction;
 
     auto best = static_cast<UCTNodePointer*>(nullptr);
     auto best_value = std::numeric_limits<double>::lowest();
@@ -297,40 +338,53 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
         } else if (child.get_visits() > 0) {
             winrate = child.get_eval(color);
         }
-
-		
-
-
         const auto psa = child.get_policy();
         const auto denom = 1.0 + child.get_visits();
-		const auto puct = cfg_puct * psa * (numerator / denom);
-		//*pure_eval / 0.5f;
+        const auto puct = cfg_puct * psa * (numerator / denom);
         const auto value = winrate + puct;
         assert(value > std::numeric_limits<double>::lowest());
 
         if (value > best_value) {
+            best_value = value;
             best = &child;
-			best_value = value;
-			/*if (parentvisits == 0)
-			{
-			break;
-			}*/
-		}
+        }
     }
+
     assert(best != nullptr);
     best->inflate();
-	return best->get();
+    return best->get();
 }
 
 class NodeComp : public std::binary_function<UCTNodePointer&,
                                              UCTNodePointer&, bool> {
 public:
-    NodeComp(int color) : m_color(color) {};
+    NodeComp(int color, float lcb_min_visits) : m_color(color),
+        m_lcb_min_visits(lcb_min_visits){};
+
+    // WARNING : on very unusual cases this can be called on multithread
+    // contexts (e.g., UCTSearch::get_pv()) so beware of race conditions
     bool operator()(const UCTNodePointer& a,
                     const UCTNodePointer& b) {
-		auto a_visit = a.get_visits();
-		auto b_visit = b.get_visits();
-		// if visits are not same, sort on visits
+        auto a_visit = a.get_visits();
+        auto b_visit = b.get_visits();
+
+        // Need at least 2 visits for LCB.
+        if (m_lcb_min_visits < 2) {
+            m_lcb_min_visits = 2;
+        }
+
+        // Calculate the lower confidence bound for each node.
+        if ((a_visit > m_lcb_min_visits) && (b_visit > m_lcb_min_visits)) {
+            auto a_lcb = a.get_eval_lcb(m_color);
+            auto b_lcb = b.get_eval_lcb(m_color);
+
+            // Sort on lower confidence bounds
+            if (a_lcb != b_lcb) {
+                return a_lcb < b_lcb;
+            }
+        }
+
+        // if visits are not same, sort on visits
         if (a_visit != b_visit) {
             return a_visit < b_visit;
         }
@@ -345,10 +399,11 @@ public:
     }
 private:
     int m_color;
+    float m_lcb_min_visits;
 };
 
-void UCTNode::sort_children(int color) {
-    std::stable_sort(rbegin(m_children), rend(m_children), NodeComp(color));
+void UCTNode::sort_children(int color, float lcb_min_visits) {
+    std::stable_sort(rbegin(m_children), rend(m_children), NodeComp(color, lcb_min_visits));
 }
 
 UCTNode& UCTNode::get_best_root_child(int color) {
@@ -356,8 +411,13 @@ UCTNode& UCTNode::get_best_root_child(int color) {
 
     assert(!m_children.empty());
 
+    auto max_visits = 0;
+    for (const auto& node : m_children) {
+        max_visits = std::max(max_visits, node.get_visits());
+    }
+
     auto ret = std::max_element(begin(m_children), end(m_children),
-                                NodeComp(color));
+                                NodeComp(color, cfg_lcb_min_visit_ratio * max_visits));
     ret->inflate();
 
     return *(ret->get());

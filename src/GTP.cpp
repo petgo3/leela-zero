@@ -1151,6 +1151,13 @@ void GTP::execute(GameState & game, const std::string& xinput) {
         return;
     } else if (command.find("kgs-chat") == 0) {
 		chat_kgs(game, id, command);
+		if (cfg_allow_pondering) {
+			// now start pondering
+			if (!game.has_resigned()) {
+				// Outputs winrate and pvs through gtp for lz-genmove_analyze
+				search->ponder();
+			}
+		}
         return;
     } else if (command.find("kgs-game_over") == 0) {
         // Do nothing. Particularly, don't ponder.
